@@ -67,7 +67,7 @@ function codigoFabrica() {
     '  ahora_ = function () { return new Date(entorno.reloj()); };',
     '  return {',
     '    publicas: {' + publicas.map((n) => ' ' + n + ': ' + n).join(',') + ' },',
-    '    privadas: { QuinielaCore: QuinielaCore, CONFIG: CONFIG, calcularPuntosGlobales_: calcularPuntosGlobales_, hashCodigo_: hashCodigo_, agregarFilas_: agregarFilas_, leerTabla_: leerTabla_ },',
+    '    privadas: { QuinielaCore: QuinielaCore, CONFIG: CONFIG, calcularPuntosGlobales_: calcularPuntosGlobales_, hashCodigo_: hashCodigo_, agregarFilas_: agregarFilas_, leerTabla_: leerTabla_, partidosResueltos_: partidosResueltos_ },',
     '  };',
     '}',
   ].join('\n');

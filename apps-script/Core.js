@@ -620,9 +620,11 @@ var QuinielaCore = (function () {
     var dia = 0;
     var slot = 0;
     function siguiente(cambioDeFase) {
-      if (cambioDeFase && slot > 0) {
-        dia += 2;
+      if (cambioDeFase) {
+        // Un día de descanso entre fases.
+        if (slot > 0) dia++;
         slot = 0;
+        dia++;
       }
       var d = new Date(base.getTime() + dia * 86400000 + horarios[slot] * 3600000);
       slot++;

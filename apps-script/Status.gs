@@ -20,8 +20,16 @@ function getAppStatus(token) {
       return partidoPublico_(p, nombres);
     });
 
+    var porId = {};
+    partidos.forEach(function (p) {
+      porId[p.id] = p;
+    });
+    var puntos = configEfectiva_().puntos;
     var mios = pronosticosDe_(u.id).map(function (p) {
+      var r = QuinielaCore.puntuarPronostico(p, porId[p.partidoId], puntos);
       return {
+        puntos: QuinielaCore.tieneMarcador(porId[p.partidoId]) ? r.puntos : null,
+        exacto: r.exacto,
         partidoId: p.partidoId,
         golesLocal: p.golesLocal,
         golesVisitante: p.golesVisitante,
