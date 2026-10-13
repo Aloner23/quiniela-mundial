@@ -63,7 +63,7 @@ Ese código es de mi empleador y no está aquí. Esto es una **reconstrucción d
 | `G74`    | Ganador del partido 74                                    | El partido 74 tiene resultado  |
 | `P101`   | Perdedor del partido 101 (para el tercer lugar)           | El partido 101 tiene resultado |
 
-Las tablas de grupo se ordenan por **puntos, diferencia de goles y goles a favor**. Los ocho terceros se reparten entre los ocho cruces `3XXXXX` como un problema de emparejamiento. Hay una prueba que recorre **las 495 combinaciones posibles** de grupos con tercero clasificado y verifica que todas tengan una asignación válida. `QuinielaCore.asignarTerceros` ya acepta la tabla oficial de FIFA como parámetro; conectarla a la configuración está en el roadmap.
+Las tablas de grupo se ordenan por **puntos, diferencia de goles y goles a favor** (criterio simplificado: el reglamento de FIFA agrega enfrentamiento directo, juego limpio y otros desempates que aquí no se modelan). Los ocho terceros se reparten entre los ocho cruces `3XXXXX` como un problema de emparejamiento. Hay una prueba que recorre **las 495 combinaciones posibles** de grupos con tercero clasificado y verifica que todas tengan una asignación válida. `QuinielaCore.asignarTerceros` ya acepta la tabla oficial de FIFA como parámetro; conectarla a la configuración está en el roadmap.
 
 ## Arquitectura
 
