@@ -1,0 +1,250 @@
+/* Elementos propios de la demo (no existen en la web app real). */
+
+@font-face {
+  font-family: 'Big Shoulders Display';
+  font-weight: 600;
+  font-display: swap;
+  src: url('fuentes/big-shoulders-display-latin-600-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Big Shoulders Display';
+  font-weight: 700;
+  font-display: swap;
+  src: url('fuentes/big-shoulders-display-latin-700-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Big Shoulders Display';
+  font-weight: 800;
+  font-display: swap;
+  src: url('fuentes/big-shoulders-display-latin-800-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Instrument Sans';
+  font-weight: 400;
+  font-display: swap;
+  src: url('fuentes/instrument-sans-latin-400-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Instrument Sans';
+  font-weight: 500;
+  font-display: swap;
+  src: url('fuentes/instrument-sans-latin-500-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Instrument Sans';
+  font-weight: 600;
+  font-display: swap;
+  src: url('fuentes/instrument-sans-latin-600-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Instrument Sans';
+  font-weight: 700;
+  font-display: swap;
+  src: url('fuentes/instrument-sans-latin-700-normal.woff2') format('woff2');
+}
+
+.demo-franja {
+  background: var(--amarilla);
+  color: var(--pizarra);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 16px;
+}
+
+@media (max-width: 520px) {
+  .demo-franja__marca,
+  .demo-franja__momento > span {
+    display: none;
+  }
+
+  .demo-franja__momento {
+    flex: 1;
+  }
+
+  .demo-franja select {
+    width: 100%;
+  }
+}
+
+.demo-franja__interior {
+  max-width: var(--ancho);
+  margin: 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+}
+
+.demo-franja__marca {
+  margin-right: auto;
+}
+
+.demo-franja select {
+  border: 1.5px solid var(--pizarra);
+  background: var(--amarilla-claro);
+  border-radius: var(--r-chico);
+  padding: 3px 6px;
+  font-weight: 600;
+}
+
+.demo-franja__boton {
+  border: 0;
+  background: var(--pizarra);
+  color: #fff;
+  border-radius: var(--r-chico);
+  padding: 5px 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.demo-cuentas {
+  border-top: 1px solid var(--linea);
+  padding-top: 16px;
+  display: grid;
+  gap: 10px;
+  font-size: 14px;
+  color: var(--tenue);
+}
+
+.demo-cuentas p {
+  margin: 0;
+}
+
+.demo-cuentas__botones {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.demo-cuentas__datos {
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pentest {
+  width: min(680px, calc(100% - 24px));
+  max-height: calc(100% - 32px);
+  border: 0;
+  border-radius: 14px;
+  padding: 0 0 20px;
+  background: var(--cal);
+  color: var(--tinta);
+}
+
+.pentest::backdrop {
+  background: rgba(16, 36, 28, 0.6);
+}
+
+.pentest > p {
+  margin: 12px 20px;
+  color: var(--tenue);
+  font-size: 14.5px;
+}
+
+.pentest__cabeza {
+  position: sticky;
+  top: 0;
+  background: var(--pizarra);
+  color: #fff;
+  padding: 14px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  z-index: 1;
+}
+
+.pentest__cabeza h2 {
+  margin: 0;
+  font-family: var(--f-display);
+  font-size: 26px;
+  font-weight: 800;
+}
+
+.pentest__cerrar {
+  background: none;
+  border: 0;
+  color: #fff;
+  font-size: 30px;
+  line-height: 1;
+  cursor: pointer;
+  width: 40px;
+  height: 40px;
+}
+
+.pentest__lista {
+  margin: 0;
+  padding: 0 20px;
+  list-style: none;
+  counter-reset: ataque;
+  display: grid;
+  gap: 14px;
+}
+
+.pentest__lista > li {
+  counter-increment: ataque;
+  background: var(--papel);
+  border: 1px solid var(--linea);
+  border-radius: var(--r-medio);
+  padding: 14px;
+  display: grid;
+  gap: 8px;
+}
+
+.pentest__lista h3 {
+  margin: 0;
+  font-family: var(--f-display);
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.pentest__lista h3::before {
+  content: counter(ataque) '. ';
+  color: var(--tenue);
+}
+
+.pentest__lista p {
+  margin: 0;
+  font-size: 14px;
+  color: var(--tenue);
+}
+
+.pentest__codigo,
+.pentest__salida {
+  display: block;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 12px;
+  background: var(--pizarra);
+  color: #e8f0eb;
+  padding: 10px 12px;
+  border-radius: var(--r-chico);
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+}
+
+.pentest__salida {
+  background: #0c1a14;
+  max-height: 220px;
+}
+
+.pentest__accion {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.pentest__veredicto {
+  margin: 0;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.pentest__lista .pentest__veredicto--ok {
+  color: var(--cesped);
+}
+
+.pentest__lista .pentest__veredicto--mal {
+  color: var(--roja);
+}

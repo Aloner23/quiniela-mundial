@@ -16,7 +16,7 @@ const appsScript = Object.fromEntries(
 );
 
 export default [
-  { ignores: ['node_modules/', 'coverage/', 'demo/servidor.js', 'src/'] },
+  { ignores: ['node_modules/', 'coverage/', 'demo/servidor.js', 'demo/gas-mock.js', 'demo/index.html', 'src/'] },
   js.configs.recommended,
   {
     files: ['apps-script/Core.js'],

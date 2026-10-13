@@ -5,3 +5,7 @@ coverage/
 demo/servidor.js
 .DS_Store
 *.log
+# Generados por npm run demo:build
+demo/index.html
+demo/gas-mock.js
+demo/fuentes/
