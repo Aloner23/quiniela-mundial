@@ -1,0 +1,1159 @@
+<script>
+  /*
+   * Cliente de la quiniela.
+   *
+   * Reglas de este archivo:
+   *  - El cliente NUNCA decide nada que importe: la cuenta regresiva y la
+   *    validación de goles son sólo comodidad; el servidor vuelve a validar.
+   *  - Todo texto que viene del servidor (nombres de participantes, equipos)
+   *    se inserta con textContent, nunca con innerHTML.
+   *  - El cliente no conoce ni manda correos para identificarse: sólo el token
+   *    de sesión que le dio loginUsuario.
+   */
+  (function () {
+    'use strict';
+
+    var ZONA = 'America/Mexico_City';
+    var CLAVE_TOKEN = 'quiniela.token';
+    var app = document.getElementById('app');
+
+    var estado = {
+      token: leerToken(),
+      usuario: null,
+      datos: null,
+      vista: 'partidos',
+      dia: null,
+      ediciones: {},
+      errores: {},
+      desfaseReloj: 0,
+      bracket: null,
+      admin: { codigo: null, historial: null, participantes: null },
+    };
+
+    // ------------------------------------------------------------------
+    // Utilidades
+    // ------------------------------------------------------------------
+
+    function leerToken() {
+      try {
+        return localStorage.getItem(CLAVE_TOKEN) || '';
+      } catch (e) {
+        return '';
+      }
+    }
+
+    function guardarToken(t) {
+      estado.token = t || '';
+      try {
+        if (t) localStorage.setItem(CLAVE_TOKEN, t);
+        else localStorage.removeItem(CLAVE_TOKEN);
+      } catch (e) {
+        /* almacenamiento bloqueado: el token vive sólo en memoria */
+      }
+    }
+
+    /** Llama a una función del servidor y devuelve una promesa. */
+    function llamar(nombre) {
+      var args = Array.prototype.slice.call(arguments, 1);
+      return new Promise(function (resolver, rechazar) {
+        var corredor = google.script.run
+          .withSuccessHandler(function (r) {
+            if (r && r.ok) return resolver(r);
+            if (r && r.error === 'NO_AUTENTICADO' && nombre !== 'loginUsuario') sesionExpirada();
+            rechazar(r || { mensaje: 'Respuesta vacía del servidor.' });
+          })
+          .withFailureHandler(function () {
+            rechazar({ error: 'RED', mensaje: 'No hay conexión con el servidor. Revisa tu red e intenta de nuevo.' });
+          });
+        corredor[nombre].apply(corredor, args);
+      });
+    }
+
+    /** Crea un elemento. Los hijos de texto se insertan como texto, nunca como HTML. */
+    function el(etiqueta, atributos) {
+      var nodo = document.createElement(etiqueta);
+      var a = atributos || {};
+      Object.keys(a).forEach(function (k) {
+        var v = a[k];
+        if (v === null || v === undefined || v === false) return;
+        if (k === 'class') nodo.className = v;
+        else if (k.indexOf('on') === 0) nodo.addEventListener(k.slice(2), v);
+        else if (k === 'html') throw new Error('No se permite html');
+        else nodo.setAttribute(k, v === true ? '' : v);
+      });
+      for (var i = 2; i < arguments.length; i++) agregar(nodo, arguments[i]);
+      return nodo;
+    }
+
+    function agregar(nodo, hijo) {
+      if (hijo === null || hijo === undefined || hijo === false) return;
+      if (Array.isArray(hijo))
+        return hijo.forEach(function (h) {
+          agregar(nodo, h);
+        });
+      nodo.appendChild(hijo instanceof Node ? hijo : document.createTextNode(String(hijo)));
+    }
+
+    function svg(ruta) {
+      var ns = 'http://www.w3.org/2000/svg';
+      var s = document.createElementNS(ns, 'svg');
+      s.setAttribute('viewBox', '0 0 24 24');
+      s.setAttribute('fill', 'none');
+      s.setAttribute('stroke', 'currentColor');
+      s.setAttribute('stroke-width', '1.8');
+      s.setAttribute('stroke-linecap', 'round');
+      s.setAttribute('stroke-linejoin', 'round');
+      s.setAttribute('aria-hidden', 'true');
+      var p = document.createElementNS(ns, 'path');
+      p.setAttribute('d', ruta);
+      s.appendChild(p);
+      return s;
+    }
+
+    var ICONOS = {
+      partidos: 'M4 5h16v14H4zM12 5v14M4 9h3v6H4M20 9h-3v6h3M12 10.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3',
+      tabla: 'M5 20V10M12 20V4M19 20v-7M3 20h18',
+      bracket: 'M3 5h5v4H3zM3 15h5v4H3zM8 7h3v10H8M11 12h3M14 10h5v4h-5z',
+      admin: 'M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6zM9 12l2 2 4-4',
+    };
+
+    function ahoraServidor() {
+      return Date.now() + estado.desfaseReloj;
+    }
+
+    var fmtDia = new Intl.DateTimeFormat('es-MX', { timeZone: ZONA, weekday: 'short' });
+    var fmtNumDia = new Intl.DateTimeFormat('es-MX', { timeZone: ZONA, day: 'numeric' });
+    var fmtFechaLarga = new Intl.DateTimeFormat('es-MX', {
+      timeZone: ZONA,
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+    });
+    var fmtHora = new Intl.DateTimeFormat('es-MX', {
+      timeZone: ZONA,
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+    var fmtClaveDia = new Intl.DateTimeFormat('en-CA', {
+      timeZone: ZONA,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    var fmtCorta = new Intl.DateTimeFormat('es-MX', {
+      timeZone: ZONA,
+      day: 'numeric',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+
+    function claveDia(iso) {
+      return fmtClaveDia.format(new Date(iso));
+    }
+
+    function cuentaRegresiva(ms) {
+      var s = Math.max(0, Math.floor(ms / 1000));
+      var d = Math.floor(s / 86400);
+      var h = Math.floor((s % 86400) / 3600);
+      var m = Math.floor((s % 3600) / 60);
+      var seg = s % 60;
+      if (d > 0) return 'Cierra en ' + d + ' d ' + h + ' h';
+      if (h > 0) return 'Cierra en ' + h + ' h ' + String(m).padStart(2, '0') + ' min';
+      return 'Cierra en ' + m + ':' + String(seg).padStart(2, '0');
+    }
+
+    var NOMBRE_FASE = {
+      GRUPOS: 'Grupo',
+      R32: 'Dieciseisavos',
+      R16: 'Octavos',
+      QF: 'Cuartos',
+      SF: 'Semifinal',
+      '3P': 'Tercer lugar',
+      FINAL: 'Final',
+    };
+
+    function etiquetaFase(p) {
+      return p.fase === 'GRUPOS' ? 'Grupo ' + p.grupo + ' · J' + p.jornada : NOMBRE_FASE[p.fase] || p.fase;
+    }
+
+    var temporizadorToast = null;
+    function toast(texto, tipo) {
+      var viejo = document.querySelector('.toast');
+      if (viejo) viejo.remove();
+      var t = el('div', { class: 'toast' + (tipo === 'error' ? ' toast--error' : ''), role: 'status' }, texto);
+      document.body.appendChild(t);
+      clearTimeout(temporizadorToast);
+      temporizadorToast = setTimeout(function () {
+        t.remove();
+      }, 3600);
+    }
+
+    // ------------------------------------------------------------------
+    // Arranque y sesión
+    // ------------------------------------------------------------------
+
+    function iniciar() {
+      llamar('quienSoy', estado.token)
+        .then(function (r) {
+          estado.usuario = r.usuario;
+          return cargarEstado();
+        })
+        .catch(function () {
+          guardarToken('');
+          mostrarLogin();
+        });
+    }
+
+    function sesionExpirada() {
+      if (!estado.usuario) return;
+      estado.usuario = null;
+      guardarToken('');
+      mostrarLogin('Tu sesión expiró. Vuelve a entrar.');
+    }
+
+    function cargarEstado() {
+      return llamar('getAppStatus', estado.token).then(function (r) {
+        estado.datos = r;
+        estado.usuario = r.usuario;
+        estado.desfaseReloj = Date.parse(r.servidorAhora) - Date.now();
+        if (!estado.dia) estado.dia = diaInicial(r.partidos);
+        pintar();
+      });
+    }
+
+    function diaInicial(partidos) {
+      var ahora = ahoraServidor();
+      var proximo = partidos.find(function (p) {
+        return p.kickoff && Date.parse(p.kickoff) + 2 * 3600000 > ahora;
+      });
+      return claveDia((proximo || partidos[partidos.length - 1]).kickoff);
+    }
+
+    function mostrarLogin(mensaje) {
+      app.textContent = '';
+      var error = el('p', { class: 'error', role: 'alert', hidden: !mensaje }, mensaje || '');
+      var email = el('input', {
+        id: 'email',
+        type: 'email',
+        autocomplete: 'email',
+        required: true,
+        inputmode: 'email',
+      });
+      var codigo = el('input', {
+        id: 'codigo',
+        type: 'password',
+        autocomplete: 'current-password',
+        required: true,
+        minlength: '4',
+        maxlength: '64',
+        autocapitalize: 'characters',
+      });
+      var boton = el('button', { class: 'boton', type: 'submit' }, 'Entrar');
+
+      function enviar(ev) {
+        ev.preventDefault();
+        boton.disabled = true;
+        boton.textContent = 'Entrando…';
+        error.hidden = true;
+        llamar('loginUsuario', email.value, codigo.value)
+          .then(function (r) {
+            if (r.token) guardarToken(r.token);
+            estado.usuario = r.usuario;
+            return cargarEstado();
+          })
+          .catch(function (r) {
+            error.textContent = r.mensaje || 'No se pudo entrar.';
+            error.hidden = false;
+            boton.disabled = false;
+            boton.textContent = 'Entrar';
+          });
+      }
+
+      app.appendChild(
+        el(
+          'div',
+          { class: 'login' },
+          el(
+            'div',
+            { class: 'login__cancha' },
+            el('h1', { class: 'login__titulo' }, 'Quiniela', el('br'), el('span', null, 'Mundial'), el('br'), '2026'),
+            el(
+              'p',
+              { class: 'login__texto' },
+              'Pronostica cada partido antes del silbatazo. Marcador exacto: 3 puntos. Ganador o empate: 1 punto.',
+            ),
+          ),
+          el(
+            'div',
+            { class: 'login__forma' },
+            el(
+              'form',
+              { onsubmit: enviar, novalidate: false },
+              el('div', { class: 'campo' }, el('label', { for: 'email' }, 'Correo'), email),
+              el(
+                'div',
+                { class: 'campo' },
+                el('label', { for: 'codigo' }, 'Código de acceso'),
+                codigo,
+                el('p', { class: 'ayuda' }, 'Te lo entrega quien administra la quiniela. Son 8 caracteres.'),
+              ),
+              error,
+              boton,
+              window.QUINIELA_DEMO ? window.QUINIELA_DEMO.ayudaLogin(email, codigo) : null,
+            ),
+          ),
+        ),
+      );
+      email.focus();
+    }
+
+    function cerrarSesion() {
+      llamar('cerrarSesion', estado.token).catch(function () {});
+      guardarToken('');
+      estado.usuario = null;
+      estado.datos = null;
+      estado.ediciones = {};
+      mostrarLogin();
+    }
+
+    // ------------------------------------------------------------------
+    // Estructura general
+    // ------------------------------------------------------------------
+
+    function pintar() {
+      detenerReloj();
+      app.textContent = '';
+      var d = estado.datos;
+      var miFila = d.tabla.find(function (f) {
+        return f.esYo;
+      });
+
+      app.appendChild(
+        el(
+          'header',
+          { class: 'barra' },
+          el(
+            'div',
+            { class: 'barra__interior' },
+            el('h1', { class: 'marca' }, 'Quiniela', el('span', null, 'Mundial 2026')),
+            el(
+              'div',
+              { class: 'resumen' },
+              miFila ? el('strong', null, miFila.puntos + ' pts') : null,
+              miFila ? miFila.posicion + '.º de ' + d.tabla.length + ' · ' : '',
+              d.usuario.nombre,
+              el('br'),
+              el('button', { class: 'enlace', type: 'button', onclick: cerrarSesion }, 'Cerrar sesión'),
+            ),
+          ),
+        ),
+      );
+
+      var main = el('main', { id: 'contenido', tabindex: '-1' });
+      app.appendChild(main);
+      var vistas = { partidos: vistaPartidos, tabla: vistaTabla, bracket: vistaBracket, admin: vistaAdmin };
+      (vistas[estado.vista] || vistaPartidos)(main);
+      main.appendChild(pie());
+
+      var botones = [
+        ['partidos', 'Partidos'],
+        ['tabla', 'Tabla'],
+        ['bracket', 'Bracket'],
+      ];
+      if (d.usuario.esAdmin) botones.push(['admin', 'Admin']);
+      app.appendChild(
+        el(
+          'nav',
+          { class: 'nav', 'aria-label': 'Secciones' },
+          botones.map(function (b) {
+            return el(
+              'button',
+              {
+                class: 'nav__boton',
+                type: 'button',
+                'aria-current': estado.vista === b[0] ? 'page' : null,
+                onclick: function () {
+                  if (estado.vista === b[0]) return;
+                  estado.vista = b[0];
+                  pintar();
+                  window.scrollTo(0, 0);
+                },
+              },
+              svg(ICONOS[b[0]]),
+              b[1],
+            );
+          }),
+        ),
+      );
+      if (estado.vista === 'partidos') app.appendChild(barraGuardar());
+    }
+
+    function pie() {
+      var d = estado.datos;
+      return el(
+        'footer',
+        { class: 'pie' },
+        el(
+          'details',
+          null,
+          el('summary', null, 'Versión ' + d.version),
+          el(
+            'ul',
+            null,
+            (d.cambios || []).map(function (c) {
+              return el('li', null, el('b', null, c.version), ' ', c.cambios);
+            }),
+          ),
+        ),
+      );
+    }
+
+    // ------------------------------------------------------------------
+    // Vista: partidos del día
+    // ------------------------------------------------------------------
+
+    var reloj = null;
+    var relojes = [];
+
+    function detenerReloj() {
+      clearInterval(reloj);
+      relojes = [];
+    }
+
+    function vistaPartidos(main) {
+      var d = estado.datos;
+      var porDia = {};
+      d.partidos.forEach(function (p) {
+        if (!p.kickoff) return;
+        var k = claveDia(p.kickoff);
+        (porDia[k] = porDia[k] || []).push(p);
+      });
+      var dias = Object.keys(porDia).sort();
+      if (!porDia[estado.dia]) estado.dia = dias[0];
+      var hoy = claveDia(new Date(ahoraServidor()).toISOString());
+      var mios = {};
+      d.misPronosticos.forEach(function (p) {
+        mios[p.partidoId] = p;
+      });
+
+      var tira = el(
+        'div',
+        { class: 'dias', role: 'group', 'aria-label': 'Elegir día' },
+        dias.map(function (k) {
+          var fecha = new Date(porDia[k][0].kickoff);
+          return el(
+            'button',
+            {
+              type: 'button',
+              class: 'dia' + (k === hoy ? ' dia--hoy' : ''),
+              'aria-pressed': k === estado.dia ? 'true' : 'false',
+              'aria-label': fmtFechaLarga.format(fecha),
+              'data-dia': k,
+              onclick: function () {
+                estado.dia = k;
+                pintar();
+              },
+            },
+            el('small', null, k === hoy ? 'Hoy' : fmtDia.format(fecha).replace('.', '')),
+            el('b', null, fmtNumDia.format(fecha)),
+          );
+        }),
+      );
+
+      var lista = porDia[estado.dia] || [];
+      var pendientes = lista.filter(function (p) {
+        return p.abierto && !mios[p.id] && p.local && p.visitante;
+      }).length;
+
+      if (!lista.length) {
+        main.appendChild(el('p', { class: 'vacio' }, 'No hay partidos programados todavía.'));
+        return;
+      }
+      main.appendChild(
+        el('h2', { class: 'titulo' }, primeraMayuscula(fmtFechaLarga.format(new Date(lista[0].kickoff)))),
+      );
+      main.appendChild(
+        el(
+          'p',
+          { class: 'subtitulo' },
+          lista.length +
+            (lista.length === 1 ? ' partido' : ' partidos') +
+            (pendientes ? ' · te faltan ' + pendientes + ' por pronosticar' : ''),
+        ),
+      );
+      main.appendChild(tira);
+      main.appendChild(
+        el(
+          'ul',
+          { class: 'partidos' },
+          lista.map(function (p) {
+            return tarjetaPartido(p, mios[p.id]);
+          }),
+        ),
+      );
+
+      setTimeout(function () {
+        var activo = tira.querySelector('[aria-pressed="true"]');
+        if (activo && activo.scrollIntoView) activo.scrollIntoView({ inline: 'center', block: 'nearest' });
+      }, 0);
+
+      reloj = setInterval(tic, 1000);
+      tic();
+    }
+
+    function primeraMayuscula(s) {
+      return s.charAt(0).toUpperCase() + s.slice(1);
+    }
+
+    function tarjetaPartido(p, mio) {
+      var edicion = estado.ediciones[p.id];
+      var definido = !!(p.local && p.visitante);
+      var tieneResultado = Number.isInteger(p.golesLocal) && Number.isInteger(p.golesVisitante);
+      var errorServidor = estado.errores[p.id];
+
+      function input(lado, etiqueta) {
+        // Partido terminado: el marcador grande es el oficial; el tuyo va al pie.
+        var valor = tieneResultado ? String(p[lado]) : edicion ? edicion[lado] : mio ? String(mio[lado]) : '';
+        var inp = el('input', {
+          type: 'text',
+          inputmode: 'numeric',
+          pattern: '[0-9]*',
+          maxlength: '2',
+          autocomplete: 'off',
+          placeholder: '–',
+          'aria-label': 'Goles de ' + etiqueta,
+          value: valor,
+          disabled: !p.abierto || !definido || tieneResultado,
+        });
+        inp.addEventListener('input', function () {
+          inp.value = inp.value.replace(/\D/g, '').slice(0, 2);
+          var e = estado.ediciones[p.id] || {
+            golesLocal: mio ? String(mio.golesLocal) : '',
+            golesVisitante: mio ? String(mio.golesVisitante) : '',
+          };
+          e[lado] = inp.value;
+          var igual = mio && e.golesLocal === String(mio.golesLocal) && e.golesVisitante === String(mio.golesVisitante);
+          if (igual || (!mio && e.golesLocal === '' && e.golesVisitante === '')) delete estado.ediciones[p.id];
+          else estado.ediciones[p.id] = e;
+          delete estado.errores[p.id];
+          var n = Number(inp.value);
+          inp.setAttribute('aria-invalid', inp.value !== '' && (n < 0 || n > 30) ? 'true' : 'false');
+          tarjeta.classList.toggle('partido--editado', !!estado.ediciones[p.id]);
+          actualizarBarraGuardar();
+        });
+        inp.addEventListener('focus', function () {
+          inp.select();
+        });
+        return inp;
+      }
+
+      var estadoNodo = el('span', { class: 'estado' });
+      var inpLocal = input('golesLocal', p.nombreLocal);
+      var inpVisit = input('golesVisitante', p.nombreVisitante);
+      relojes.push({ partido: p, nodo: estadoNodo, inputs: [inpLocal, inpVisit] });
+
+      var pie = [];
+      if (tieneResultado) {
+        pie.push(
+          el(
+            'span',
+            { class: 'real' },
+            mio ? ['Tu pronóstico ', el('b', null, mio.golesLocal + '–' + mio.golesVisitante)] : 'Sin pronóstico',
+            p.avanza && p.golesLocal === p.golesVisitante ? ' · avanzó ' + p.avanza + ' en penales' : '',
+          ),
+        );
+        if (mio) {
+          var clase = mio.exacto ? 'puntos puntos--exacto' : mio.puntos > 0 ? 'puntos puntos--acierto' : 'puntos';
+          var texto = mio.exacto
+            ? '+' + mio.puntos + ' exacto'
+            : mio.puntos > 0
+              ? '+' + mio.puntos + ' resultado'
+              : '0 pts';
+          pie.push(el('span', { class: clase }, texto));
+        }
+      } else if (!definido) {
+        pie.push(el('span', null, 'Se define al terminar la ronda anterior.'));
+      } else if (mio && !p.abierto) {
+        pie.push(el('span', null, 'Tu pronóstico quedó registrado. Esperando resultado.'));
+      } else if (mio) {
+        pie.push(
+          el('span', null, mio.version > 1 ? 'Guardado · editado ' + (mio.version - 1) + ' vez(es)' : 'Guardado'),
+        );
+      }
+      if (errorServidor) pie.push(el('span', { class: 'partido__error', role: 'alert' }, errorServidor));
+
+      var tarjeta = el(
+        'li',
+        { class: 'partido' + (edicion ? ' partido--editado' : '') + (tieneResultado ? ' partido--final' : '') },
+        el(
+          'div',
+          { class: 'partido__meta' },
+          el('span', null, el('b', null, fmtHora.format(new Date(p.kickoff))), ' · ', etiquetaFase(p), ' · ', p.sede),
+          estadoNodo,
+        ),
+        el(
+          'div',
+          { class: 'marcador' },
+          filaEquipo(p.local, p.nombreLocal),
+          el('div', { class: 'goles' }, inpLocal),
+          filaEquipo(p.visitante, p.nombreVisitante),
+          el('div', { class: 'goles' }, inpVisit),
+        ),
+        pie.length ? el('div', { class: 'partido__pie' }, pie) : null,
+      );
+      return tarjeta;
+    }
+
+    function filaEquipo(codigo, nombre) {
+      return el(
+        'div',
+        { class: 'equipo__nombre' + (codigo ? '' : ' equipo__nombre--pendiente') },
+        codigo ? el('span', { class: 'codigo-equipo', 'aria-hidden': 'true' }, codigo) : null,
+        el('span', null, nombre),
+      );
+    }
+
+    /** Actualiza las cuentas regresivas y bloquea los partidos que ya empezaron. */
+    function tic() {
+      var ahora = ahoraServidor();
+      relojes.forEach(function (r) {
+        var p = r.partido;
+        var falta = Date.parse(p.cierre) - ahora;
+        var texto, clase;
+        if (Number.isInteger(p.golesLocal)) {
+          texto = 'Finalizado';
+          clase = 'estado estado--cerrado';
+        } else if (falta <= 0 || !p.abierto) {
+          texto = 'Cerrado';
+          clase = 'estado estado--cerrado';
+          if (p.abierto) {
+            p.abierto = false;
+            r.inputs.forEach(function (i) {
+              i.disabled = true;
+            });
+            if (estado.ediciones[p.id]) {
+              delete estado.ediciones[p.id];
+              estado.errores[p.id] = 'El partido empezó antes de que guardaras.';
+              actualizarBarraGuardar();
+            }
+          }
+        } else {
+          texto = cuentaRegresiva(falta);
+          clase = 'estado ' + (falta < 3600000 ? 'estado--pronto' : 'estado--abierto');
+        }
+        if (r.nodo.textContent !== texto) r.nodo.textContent = texto;
+        if (r.nodo.className !== clase) r.nodo.className = clase;
+      });
+    }
+
+    // Barra fija para guardar el lote de cambios.
+    var barra = null;
+
+    function barraGuardar() {
+      var boton = el('button', { class: 'boton', type: 'button', onclick: guardarLote }, 'Guardar');
+      barra = el(
+        'div',
+        { class: 'guardar', role: 'region', 'aria-label': 'Cambios sin guardar' },
+        el('div', { class: 'guardar__interior' }, el('span', { class: 'guardar__texto' }), boton),
+      );
+      actualizarBarraGuardar();
+      return barra;
+    }
+
+    function actualizarBarraGuardar() {
+      if (!barra) return;
+      var n = Object.keys(estado.ediciones).length;
+      barra.hidden = n === 0;
+      barra.querySelector('.guardar__texto').textContent =
+        n === 1 ? '1 pronóstico sin guardar' : n + ' pronósticos sin guardar';
+    }
+
+    function guardarLote() {
+      var ids = Object.keys(estado.ediciones);
+      var lote = [];
+      var incompletos = 0;
+      ids.forEach(function (id) {
+        var e = estado.ediciones[id];
+        if (e.golesLocal === '' || e.golesVisitante === '') {
+          incompletos++;
+          estado.errores[id] = 'Escribe los goles de ambos equipos.';
+          return;
+        }
+        lote.push({ partidoId: id, golesLocal: Number(e.golesLocal), golesVisitante: Number(e.golesVisitante) });
+      });
+      if (!lote.length) {
+        pintar();
+        return toast('Completa los dos marcadores de cada partido.', 'error');
+      }
+      var boton = barra.querySelector('button');
+      boton.disabled = true;
+      boton.textContent = 'Guardando…';
+      llamar('guardarPronosticosLote', estado.token, lote)
+        .then(function (r) {
+          r.guardados.forEach(function (id) {
+            delete estado.ediciones[id];
+            delete estado.errores[id];
+          });
+          r.rechazados.forEach(function (x) {
+            if (x.partidoId) {
+              estado.errores[x.partidoId] = x.mensaje;
+              delete estado.ediciones[x.partidoId];
+            }
+          });
+          var msg = r.guardados.length === 1 ? 'Pronóstico guardado' : r.guardados.length + ' pronósticos guardados';
+          if (r.rechazados.length) msg += ' · ' + r.rechazados.length + ' rechazado(s)';
+          toast(
+            msg + (incompletos ? ' · ' + incompletos + ' incompleto(s)' : ''),
+            r.rechazados.length ? 'error' : null,
+          );
+          return cargarEstado();
+        })
+        .catch(function (r) {
+          toast(r.mensaje || 'No se pudo guardar.', 'error');
+          boton.disabled = false;
+          boton.textContent = 'Guardar';
+        });
+    }
+
+    // ------------------------------------------------------------------
+    // Vista: tabla general
+    // ------------------------------------------------------------------
+
+    function vistaTabla(main) {
+      var d = estado.datos;
+      var P = d.reglas.puntos;
+      var jugados = d.partidos.filter(function (p) {
+        return Number.isInteger(p.golesLocal);
+      }).length;
+      main.appendChild(el('h2', { class: 'titulo' }, 'Tabla general'));
+      main.appendChild(
+        el(
+          'p',
+          { class: 'subtitulo' },
+          jugados +
+            ' de ' +
+            d.partidos.length +
+            ' partidos jugados. Empates en puntos se rompen por marcadores exactos y luego por resultados acertados.',
+        ),
+      );
+      main.appendChild(
+        el(
+          'ul',
+          { class: 'reglas', 'aria-label': 'Reglas de puntuación' },
+          el('li', null, 'Marcador exacto ', el('b', null, P.EXACTO + ' pts')),
+          el('li', null, 'Ganador o empate ', el('b', null, P.RESULTADO + ' pt' + (P.RESULTADO === 1 ? '' : 's'))),
+          el(
+            'li',
+            null,
+            d.reglas.minutosCierre ? 'Cierre ' + d.reglas.minutosCierre + ' min antes' : 'Cierre al silbatazo',
+          ),
+        ),
+      );
+      main.appendChild(
+        el(
+          'table',
+          { class: 'tabla' },
+          el(
+            'thead',
+            null,
+            el(
+              'tr',
+              null,
+              el('th', { scope: 'col' }, el('span', { class: 'sr' }, 'Posición')),
+              el('th', { scope: 'col' }, 'Participante'),
+              el('th', { scope: 'col', class: 'col-extra' }, 'Exactos'),
+              el('th', { scope: 'col', class: 'col-extra' }, 'Aciertos'),
+              el('th', { scope: 'col' }, 'Pts'),
+            ),
+          ),
+          el(
+            'tbody',
+            null,
+            d.tabla.map(function (f) {
+              return el(
+                'tr',
+                { class: (f.posicion <= 3 ? 'podio ' : '') + (f.esYo ? 'yo' : '') },
+                el('td', { class: 'pos' }, f.posicion),
+                el('td', { class: 'nombre' }, f.nombre, f.esYo ? el('span', { class: 'sr' }, ' (tú)') : null),
+                el('td', { class: 'col-extra' }, f.exactos),
+                el('td', { class: 'col-extra' }, f.aciertos),
+                el('td', { class: 'pts' }, f.puntos),
+              );
+            }),
+          ),
+        ),
+      );
+    }
+
+    // ------------------------------------------------------------------
+    // Vista: bracket
+    // ------------------------------------------------------------------
+
+    function vistaBracket(main) {
+      main.appendChild(el('h2', { class: 'titulo' }, 'Camino a la final'));
+      var cont = el(
+        'div',
+        null,
+        el('div', { class: 'cargando' }, el('div', null, el('div', { class: 'balon' }), 'Armando el cuadro…')),
+      );
+      main.appendChild(cont);
+      llamar('getBracket', estado.token)
+        .then(function (b) {
+          estado.bracket = b;
+          cont.textContent = '';
+          pintarBracket(cont, b);
+        })
+        .catch(function (r) {
+          cont.textContent = '';
+          cont.appendChild(el('p', { class: 'error' }, r.mensaje || 'No se pudo cargar el cuadro.'));
+        });
+    }
+
+    function pintarBracket(cont, b) {
+      cont.appendChild(
+        el(
+          'p',
+          { class: 'subtitulo' },
+          'Los cruces usan códigos de posición: 1C es el primero del grupo C, 2F el segundo del F y 3.º A/B/C/D/F uno de los ocho mejores terceros.',
+        ),
+      );
+      if (!b.gruposCompletos) {
+        cont.appendChild(
+          el(
+            'p',
+            { class: 'aviso-provisional' },
+            'La fase de grupos sigue en juego: así quedaría el cuadro si terminara hoy.',
+          ),
+        );
+      }
+
+      // Cuadro de eliminatorias en orden de árbol.
+      var porId = {};
+      b.eliminatorias.forEach(function (m) {
+        porId[m.id] = m;
+      });
+      var final = b.eliminatorias.find(function (m) {
+        return m.fase === 'FINAL';
+      });
+      var niveles = [];
+      var actual = final ? [final] : [];
+      while (actual.length) {
+        niveles.unshift(actual);
+        var siguiente = [];
+        actual.forEach(function (m) {
+          [m.codigoLocal, m.codigoVisitante].forEach(function (c) {
+            var g = /^G(\d+)$/.exec(c || '');
+            if (g && porId[g[1]]) siguiente.push(porId[g[1]]);
+          });
+        });
+        actual = siguiente;
+      }
+      var tercer = b.eliminatorias.find(function (m) {
+        return m.fase === '3P';
+      });
+      cont.appendChild(
+        el(
+          'section',
+          { class: 'seccion', 'aria-label': 'Cuadro de eliminatorias' },
+          el(
+            'div',
+            { class: 'cuadro' },
+            niveles.map(function (ronda) {
+              var fase = ronda[0].fase;
+              return el(
+                'div',
+                { class: 'ronda' },
+                el('h4', null, NOMBRE_FASE[fase]),
+                el(
+                  'div',
+                  { class: 'ronda__partidos' },
+                  ronda.map(llave),
+                  fase === 'FINAL' && tercer
+                    ? [el('h4', { style: 'margin-top:18px' }, 'Tercer lugar'), llave(tercer)]
+                    : null,
+                ),
+              );
+            }),
+          ),
+        ),
+      );
+
+      // Grupos.
+      cont.appendChild(
+        el(
+          'section',
+          { class: 'seccion' },
+          el('h3', null, 'Fase de grupos'),
+          el(
+            'div',
+            { class: 'grupos' },
+            Object.keys(b.grupos).map(function (g) {
+              var grupo = b.grupos[g];
+              var tercerosOk = {};
+              b.terceros.forEach(function (t) {
+                if (t.clasifica) tercerosOk[t.equipo] = true;
+              });
+              return el(
+                'div',
+                { class: 'grupo' },
+                el('h4', null, 'Grupo ' + g, el('small', null, grupo.completo ? 'Terminado' : 'En juego')),
+                el(
+                  'ol',
+                  null,
+                  grupo.filas.map(function (f, i) {
+                    var clase = i < 2 ? 'pasa' : i === 2 && tercerosOk[f.equipo] ? 'pasa-tercero' : '';
+                    return el(
+                      'li',
+                      { class: clase },
+                      el('span', { class: 'n' }, i + 1),
+                      el('span', null, f.nombre),
+                      el('span', { class: 'dg' }, (f.dg > 0 ? '+' : '') + f.dg),
+                      el('span', { class: 'pt' }, f.pts),
+                    );
+                  }),
+                ),
+              );
+            }),
+          ),
+          el(
+            'p',
+            { class: 'leyenda' },
+            el('span', { class: 'l-pasa' }, 'Clasifica (1.º y 2.º)'),
+            el('span', { class: 'l-tercero' }, 'Entre los 8 mejores terceros'),
+            el('span', null, 'Desempate: puntos, diferencia de goles, goles a favor'),
+          ),
+        ),
+      );
+    }
+
+    function llave(m) {
+      var jugado = Number.isInteger(m.golesLocal);
+      var ganador = null;
+      if (jugado) {
+        ganador = m.golesLocal > m.golesVisitante ? m.local : m.golesVisitante > m.golesLocal ? m.visitante : m.avanza;
+      }
+      function fila(codigo, nombre, goles) {
+        return el(
+          'div',
+          {
+            class:
+              'llave__fila' +
+              (codigo ? '' : ' llave__fila--codigo') +
+              (ganador && ganador === codigo ? ' llave__fila--gana' : ''),
+          },
+          el('span', { title: nombre }, nombre),
+          jugado ? el('b', null, goles) : null,
+        );
+      }
+      return el(
+        'div',
+        { class: 'llave' + (m.fase === 'FINAL' ? ' llave--final' : ''), 'aria-label': 'Partido ' + m.id },
+        el('span', { class: 'llave__id' }, '#' + m.id + ' · ' + fmtCorta.format(new Date(m.kickoff))),
+        fila(m.local, m.nombreLocal, m.golesLocal),
+        fila(m.visitante, m.nombreVisitante, m.golesVisitante),
+      );
+    }
+
+    // ------------------------------------------------------------------
+    // Vista: administración
+    // ------------------------------------------------------------------
+
+    function vistaAdmin(main) {
+      var d = estado.datos;
+      main.appendChild(el('h2', { class: 'titulo' }, 'Administración'));
+      main.appendChild(
+        el(
+          'p',
+          { class: 'subtitulo' },
+          'Cada acción se valida de nuevo en el servidor contra la lista de administradores y queda en la bitácora.',
+        ),
+      );
+
+      // Capturar resultado
+      var candidatos = d.partidos.filter(function (p) {
+        return !p.abierto && p.local && p.visitante;
+      });
+      candidatos.sort(function (a, b) {
+        var ra = Number.isInteger(a.golesLocal) ? 1 : 0;
+        var rb = Number.isInteger(b.golesLocal) ? 1 : 0;
+        return ra - rb || Date.parse(b.kickoff) - Date.parse(a.kickoff);
+      });
+      var sel = el(
+        'select',
+        { id: 'adm-partido' },
+        candidatos.length
+          ? candidatos.map(function (p) {
+              var r = Number.isInteger(p.golesLocal)
+                ? ' (' + p.golesLocal + '–' + p.golesVisitante + ')'
+                : ' · sin resultado';
+              return el('option', { value: p.id }, '#' + p.id + ' ' + p.nombreLocal + ' vs ' + p.nombreVisitante + r);
+            })
+          : el('option', { value: '' }, 'No hay partidos por capturar'),
+      );
+      var gl = el('input', { id: 'adm-gl', type: 'number', min: '0', max: '30', inputmode: 'numeric', required: true });
+      var gv = el('input', { id: 'adm-gv', type: 'number', min: '0', max: '30', inputmode: 'numeric', required: true });
+      var avanzaSel = el('select', { id: 'adm-avanza' });
+      var avanzaCampo = el(
+        'div',
+        { class: 'campo', hidden: true },
+        el('label', { for: 'adm-avanza' }, 'Avanza en penales'),
+        avanzaSel,
+      );
+      function revisarEmpate() {
+        var p = candidatos.find(function (x) {
+          return x.id === sel.value;
+        });
+        var empate = p && p.fase !== 'GRUPOS' && gl.value !== '' && gl.value === gv.value;
+        avanzaCampo.hidden = !empate;
+        if (empate) {
+          avanzaSel.textContent = '';
+          avanzaSel.appendChild(el('option', { value: p.local }, p.nombreLocal));
+          avanzaSel.appendChild(el('option', { value: p.visitante }, p.nombreVisitante));
+        }
+      }
+      [sel, gl, gv].forEach(function (x) {
+        x.addEventListener('input', revisarEmpate);
+      });
+      var btnRes = el('button', { class: 'boton', type: 'submit', disabled: !candidatos.length }, 'Guardar resultado');
+      main.appendChild(
+        el(
+          'section',
+          { class: 'seccion' },
+          el('h3', null, 'Capturar resultado oficial'),
+          el(
+            'form',
+            {
+              class: 'panel',
+              onsubmit: function (ev) {
+                ev.preventDefault();
+                btnRes.disabled = true;
+                llamar(
+                  'adminRegistrarResultado',
+                  estado.token,
+                  sel.value,
+                  Number(gl.value),
+                  Number(gv.value),
+                  avanzaCampo.hidden ? '' : avanzaSel.value,
+                )
+                  .then(function () {
+                    toast('Resultado guardado. Tabla recalculada.');
+                    estado.bracket = null;
+                    return cargarEstado();
+                  })
+                  .catch(function (r) {
+                    toast(r.mensaje || 'No se pudo guardar.', 'error');
+                    btnRes.disabled = false;
+                  });
+              },
+            },
+            el('div', { class: 'campo' }, el('label', { for: 'adm-partido' }, 'Partido ya iniciado'), sel),
+            el(
+              'div',
+              { class: 'fila-goles' },
+              el('div', { class: 'campo' }, el('label', { for: 'adm-gl' }, 'Goles local'), gl),
+              el('div', { class: 'campo' }, el('label', { for: 'adm-gv' }, 'Goles visitante'), gv),
+            ),
+            avanzaCampo,
+            el(
+              'p',
+              { class: 'ayuda' },
+              'En eliminatorias cuenta el marcador al final del tiempo extra; los penales sólo definen quién avanza.',
+            ),
+            btnRes,
+          ),
+        ),
+      );
+
+      // Alta de participante
+      var nombre = el('input', { id: 'adm-nombre', maxlength: '40', required: true, autocomplete: 'off' });
+      var correo = el('input', { id: 'adm-correo', type: 'email', required: true, autocomplete: 'off' });
+      var entregado = el('div', { hidden: !estado.admin.codigo });
+      if (estado.admin.codigo) pintarCodigo(entregado, estado.admin.codigo);
+      var btnAlta = el('button', { class: 'boton boton--sec', type: 'submit' }, 'Inscribir participante');
+      main.appendChild(
+        el(
+          'section',
+          { class: 'seccion' },
+          el('h3', null, 'Inscribir participante'),
+          el(
+            'form',
+            {
+              class: 'panel',
+              onsubmit: function (ev) {
+                ev.preventDefault();
+                btnAlta.disabled = true;
+                llamar('adminAltaParticipante', estado.token, nombre.value, correo.value)
+                  .then(function (r) {
+                    estado.admin.codigo = { nombre: r.participante.nombre, codigo: r.codigo };
+                    estado.admin.participantes = null;
+                    return cargarEstado();
+                  })
+                  .catch(function (r) {
+                    toast(r.mensaje || 'No se pudo inscribir.', 'error');
+                    btnAlta.disabled = false;
+                  });
+              },
+            },
+            el('div', { class: 'campo' }, el('label', { for: 'adm-nombre' }, 'Nombre visible en la tabla'), nombre),
+            el('div', { class: 'campo' }, el('label', { for: 'adm-correo' }, 'Correo'), correo),
+            el(
+              'p',
+              { class: 'ayuda' },
+              'El código de acceso se muestra una sola vez. En la hoja sólo se guarda su hash.',
+            ),
+            entregado,
+            btnAlta,
+          ),
+        ),
+      );
+
+      // Bitácora
+      var lista = el('ul', { class: 'historial' }, el('li', null, 'Cargando…'));
+      main.appendChild(el('section', { class: 'seccion' }, el('h3', null, 'Bitácora reciente'), lista));
+      llamar('adminHistorial', estado.token, 25)
+        .then(function (r) {
+          lista.textContent = '';
+          if (!r.movimientos.length) lista.appendChild(el('li', null, 'Sin movimientos todavía.'));
+          r.movimientos.forEach(function (m) {
+            var alerta = m.accion === 'ACCESO_DENEGADO' || m.accion === 'LOGIN_FALLIDO';
+            lista.appendChild(
+              el(
+                'li',
+                null,
+                el('time', { datetime: m.fecha }, fmtCorta.format(new Date(m.fecha)) + ' · ' + m.actor),
+                el(
+                  'span',
+                  { class: 'accion' + (alerta ? ' accion--alerta' : '') },
+                  m.accion.replace(/_/g, ' ').toLowerCase(),
+                ),
+                el('span', null, m.detalle),
+              ),
+            );
+          });
+        })
+        .catch(function (r) {
+          lista.textContent = '';
+          lista.appendChild(el('li', { class: 'error' }, r.mensaje || 'No se pudo cargar la bitácora.'));
+        });
+    }
+
+    function pintarCodigo(nodo, dato) {
+      nodo.textContent = '';
+      nodo.hidden = false;
+      nodo.appendChild(
+        el(
+          'div',
+          { class: 'codigo-entregado', role: 'status' },
+          el('span', null, 'Código de acceso de ' + dato.nombre + ':'),
+          el('code', null, dato.codigo),
+          el('small', null, 'Cópialo ahora y entrégalo en privado. No se volverá a mostrar.'),
+        ),
+      );
+    }
+
+    iniciar();
+  })();
+</script>
