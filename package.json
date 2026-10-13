@@ -12,7 +12,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "demo:build": "node tools/construir-demo.js",
-    "demo:serve": "node tools/construir-demo.js && npx --yes serve demo -l 4173",
+    "demo:serve": "node tools/construir-demo.js && npx --yes http-server demo -p 4173 -c-1",
     "screenshots": "node tools/capturas.js"
   },
   "devDependencies": {
