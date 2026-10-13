@@ -2,7 +2,6 @@ node_modules
 coverage
 demo/servidor.js
 docs/capturas
-src
 package-lock.json
 demo/index.html
 demo/gas-mock.js

@@ -54,6 +54,8 @@ describe('Hallazgo 1: suplantación de identidad', () => {
   });
 
   it('el token expira a las 6 horas', () => {
+    const r = q.api.loginUsuario(ANA.email, ANA.codigo);
+    expect(r.expiraEnSeg).toBe(6 * 3600);
     const token = q.login(ANA);
     q.entorno.moverReloj(6 * UNA_HORA + 1000);
     expect(q.api.quienSoy(token)).toMatchObject({ ok: false, error: 'NO_AUTENTICADO' });

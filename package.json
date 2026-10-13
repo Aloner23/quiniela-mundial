@@ -8,9 +8,9 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "eslint .",
-    "format": "prettier --write .",
-    "format:check": "prettier --check .",
+    "lint": "eslint apps-script tests tools demo eslint.config.mjs vitest.config.mjs",
+    "format": "prettier --write apps-script tests tools demo docs .github *.mjs *.json *.md",
+    "format:check": "prettier --check apps-script tests tools demo docs .github *.mjs *.json *.md",
     "demo:build": "node tools/construir-demo.js",
     "demo:serve": "node tools/construir-demo.js && npx --yes http-server demo -p 4173 -c-1",
     "screenshots": "node tools/capturas.js"

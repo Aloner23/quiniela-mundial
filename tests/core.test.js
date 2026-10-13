@@ -207,6 +207,8 @@ describe('esAdmin', () => {
   it('compara contra la lista blanca sin distinguir mayúsculas', () => {
     expect(C.esAdmin('Admin@Example.com', 'otro@example.com, admin@example.com')).toBe(true);
     expect(C.esAdmin('admin@example.com.mx', 'admin@example.com')).toBe(false);
+    expect(C.esAdmin('min@example.com', 'admin@example.com')).toBe(false);
+    expect(C.esAdmin('admin@example.co', 'admin@example.com')).toBe(false);
     expect(C.esAdmin('', 'admin@example.com')).toBe(false);
     expect(C.esAdmin('a@example.com', '')).toBe(false);
     expect(C.esAdmin(['admin@example.com'], 'admin@example.com')).toBe(false);
