@@ -1,0 +1,28 @@
+{
+  "name": "quiniela-mundial",
+  "private": true,
+  "version": "2.3.0",
+  "description": "Quiniela del Mundial 2026 en Google Apps Script, con pruebas de seguridad y demo estática.",
+  "license": "MIT",
+  "author": "Carlos (Aloner23)",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "demo:build": "node tools/construir-demo.js",
+    "demo:serve": "node tools/construir-demo.js && npx --yes serve demo -l 4173",
+    "screenshots": "node tools/capturas.js"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.12.0",
+    "globals": "^17.13.0",
+    "prettier": "^3.9.10",
+    "vitest": "^5.0.4"
+  },
+  "engines": {
+    "node": ">=20.19"
+  }
+}
