@@ -1,5 +1,11 @@
 # Quiniela Mundial 2026
 
+[**Abrir demo**](https://aloner23.github.io/quiniela-mundial/) · [Informe de seguridad](docs/SEGURIDAD.md) · [Arquitectura](#arquitectura) · [Instalación](#instalar-en-google-apps-script)
+
+**Recorrido de 2 minutos:** entra con **Participante**, explora los partidos y la clasificación; abre **Probar ataques** para ver las comprobaciones de seguridad. También puedes entrar con **Administrador**. Los participantes son ficticios y el calendario es ilustrativo; no representa resultados reales del torneo.
+
+[![CI](https://github.com/Aloner23/quiniela-mundial/actions/workflows/ci.yml/badge.svg)](https://github.com/Aloner23/quiniela-mundial/actions/workflows/ci.yml)
+
 Una quiniela del Mundial para un grupo de amigos o de la oficina, hecha en **Google Apps Script** sobre una hoja de Google Sheets: cada quien pronostica los marcadores desde el celular, la captura se cierra al silbatazo, el admin carga los resultados y la tabla se actualiza sola.
 
 Lo más interesante del proyecto no es la quiniela, sino que **la ataqué yo mismo**. Encontré que cualquier participante podía hacerse pasar por otro, ver los pronósticos de todos y capturar resultados oficiales desde la consola del navegador. Este repositorio tiene las correcciones y **una prueba automatizada por cada ataque**. La historia completa está en [**docs/SEGURIDAD.md**](docs/SEGURIDAD.md).
